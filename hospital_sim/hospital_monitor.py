@@ -3,7 +3,6 @@ import time
 import json
 import sys
 import os
-import math
 
 # --- CONFIGURATION ---
 POSSIBLE_FILENAMES = ['mitbih_test.csv', '100.csv']

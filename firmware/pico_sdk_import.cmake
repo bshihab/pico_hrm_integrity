@@ -1,29 +1,61 @@
-cmake_minimum_required(VERSION 3.12)
+# This is a copy of <PICO_SDK_PATH>/external/pico_sdk_import.cmake
 
-# 1. TELL CMAKE TO DOWNLOAD THE SDK IF MISSING
-set(PICO_SDK_FETCH_FROM_GIT ON)
+# This can be dropped into an external project to help locate this SDK
+# It should be included in your CMakeLists.txt
 
-# 2. INCLUDE THE SCRIPT YOU JUST MADE
-include(pico_sdk_import.cmake)
+if (DEFINED ENV{PICO_SDK_PATH} AND (NOT PICO_SDK_PATH))
+    set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
+    message("Using PICO_SDK_PATH from environment ('${PICO_SDK_PATH}')")
+endif ()
 
-project(pico_hrm_integrity C CXX ASM)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
+if (DEFINED ENV{PICO_SDK_FETCH_FROM_GIT} AND (NOT PICO_SDK_FETCH_FROM_GIT))
+    set(PICO_SDK_FETCH_FROM_GIT $ENV{PICO_SDK_FETCH_FROM_GIT})
+    message("Using PICO_SDK_FETCH_FROM_GIT from environment ('${PICO_SDK_FETCH_FROM_GIT}')")
+endif ()
 
-# 3. INITIALIZE THE SDK
-pico_sdk_init()
+if (DEFINED ENV{PICO_SDK_FETCH_FROM_GIT_PATH} AND (NOT PICO_SDK_FETCH_FROM_GIT_PATH))
+    set(PICO_SDK_FETCH_FROM_GIT_PATH $ENV{PICO_SDK_FETCH_FROM_GIT_PATH})
+    message("Using PICO_SDK_FETCH_FROM_GIT_PATH from environment ('${PICO_SDK_FETCH_FROM_GIT_PATH}')")
+endif ()
 
-# 4. ADD YOUR C FILE
-add_executable(hrm_firmware
-    src/main.c
-)
+set(PICO_SDK_PATH "${PICO_SDK_PATH}" CACHE PATH "Path to the Raspberry Pi Pico SDK")
+set(PICO_SDK_FETCH_FROM_GIT "${PICO_SDK_FETCH_FROM_GIT}" CACHE BOOL "Set to ON to fetch copy of SDK from git if not otherwise locatable")
+set(PICO_SDK_FETCH_FROM_GIT_PATH "${PICO_SDK_FETCH_FROM_GIT_PATH}" CACHE FILEPATH "location to download SDK")
 
-# 5. ENABLE USB OUTPUT (So you can see printf)
-pico_enable_stdio_usb(hrm_firmware 1)
-pico_enable_stdio_uart(hrm_firmware 0)
+if (NOT PICO_SDK_PATH)
+    if (PICO_SDK_FETCH_FROM_GIT)
+        include(FetchContent)
+        set(FETCHCONTENT_BASE_DIR_SAVE ${FETCHCONTENT_BASE_DIR})
+        if (PICO_SDK_FETCH_FROM_GIT_PATH)
+            get_filename_component(FETCHCONTENT_BASE_DIR "${PICO_SDK_FETCH_FROM_GIT_PATH}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+        endif ()
+        FetchContent_Declare(
+                pico_sdk
+                GIT_REPOSITORY https://github.com/raspberrypi/pico-sdk
+                GIT_TAG master
+        )
+        if (NOT picosdk_POPULATED)
+            FetchContent_Populate(pico_sdk)
+            set(PICO_SDK_PATH ${picosdk_SOURCE_DIR})
+        endif ()
+        set(FETCHCONTENT_BASE_DIR ${FETCHCONTENT_BASE_DIR_SAVE})
+    else ()
+        message(FATAL_ERROR
+                "SDK location was not specified. Please set PICO_SDK_PATH or set PICO_SDK_FETCH_FROM_GIT to on to fetch from git."
+        )
+    endif ()
+endif ()
 
-# 6. LINK LIBRARIES (Multicore support)
-target_link_libraries(hrm_firmware pico_stdlib pico_multicore)
+get_filename_component(PICO_SDK_PATH "${PICO_SDK_PATH}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+if (NOT EXISTS ${PICO_SDK_PATH})
+    message(FATAL_ERROR "Directory '${PICO_SDK_PATH}' not found")
+endif ()
 
-# 7. CREATE THE .UF2 FILE (For Drag-and-Drop)
-pico_add_extra_outputs(hrm_firmware)
+set(PICO_SDK_INIT_CMAKE_FILE ${PICO_SDK_PATH}/pico_sdk_init.cmake)
+if (NOT EXISTS ${PICO_SDK_INIT_CMAKE_FILE})
+    message(FATAL_ERROR "Directory '${PICO_SDK_PATH}' does not appear to contain the Raspberry Pi Pico SDK")
+endif ()
+
+set(PICO_SDK_PATH ${PICO_SDK_PATH} CACHE PATH "Path to the Raspberry Pi Pico SDK" FORCE)
+
+include(${PICO_SDK_INIT_CMAKE_FILE})
