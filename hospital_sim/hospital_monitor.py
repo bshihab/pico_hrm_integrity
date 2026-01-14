@@ -5,6 +5,7 @@ import json
 import os
 
 # config
+SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
 CSV_FILE = 'mitbih_test.csv'
 
