@@ -1,75 +1,78 @@
 import pandas as pd
+import serial
 import time
 import json
-import sys
 import os
 
-# --- CONFIGURATION ---
-POSSIBLE_FILENAMES = ['mitbih_test.csv', '100.csv']
-SAMPLE_RATE_HZ = 100 
-SLEEP_TIME = 1.0 / SAMPLE_RATE_HZ
+# config
+BAUD_RATE = 115200
+CSV_FILE = 'mitbih_test.csv'
 
-def generate_synthetic_data():
-    """Generates a fake ECG signal if no CSV is found."""
-    print("WARNING: CSV not found. Generating synthetic data...", file=sys.stderr)
-    data = []
-    for i in range(500):
-        phase = i % 100
-        val = 0.8 if (phase > 10 and phase < 20) else 0.1
-        data.append(val)
-    return data
-
-def load_and_stitch_data():
-    # 1. Get the folder where THIS script lives (hospital_sim)
+def load_data():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 2. Also check the current working directory just in case
-    cwd = os.getcwd()
-    
-    found_path = None
-    
-    # Check both locations for the file
-    search_dirs = [script_dir, cwd, os.path.join(cwd, 'hospital_sim')]
-    
-    for folder in search_dirs:
-        for name in POSSIBLE_FILENAMES:
-            path = os.path.join(folder, name)
-            if os.path.exists(path):
-                found_path = path
-                break
-        if found_path: break
-            
-    if not found_path:
-        print(f"Error: Could not find CSV in: {search_dirs}", file=sys.stderr)
-        return generate_synthetic_data()
-        
-    print(f"Loading {found_path}...", file=sys.stderr)
-    try:
-        df = pd.read_csv(found_path, header=None)
-        subset = df.iloc[0:100, :-1] 
-        continuous_signal = subset.values.flatten().tolist()
-        print(f"Stitched {len(continuous_signal)} samples.")
-        return continuous_signal
-    except Exception as e:
-        print(f"Error reading CSV: {e}", file=sys.stderr)
-        return generate_synthetic_data()
+    file_path = os.path.join(script_dir, CSV_FILE)
 
-def stream_heartbeat(data):
-    if not data: return
-    index = 0
-    total_samples = len(data)
-    print("Starting Continuous Stream...", file=sys.stderr)
-    while True:
-        packet = {"val": data[index], "status": "ok"}
-        print(json.dumps(packet))
-        sys.stdout.flush() 
-        index += 1
-        if index >= total_samples: index = 0
-        time.sleep(SLEEP_TIME)
+    if not os.path.exists(file_path):
+        if os.path.exists(CSV_FILE):
+            file_path = CSV_FILE
+        else:
+            print(f"CSV file not found at {file_path}")
+            return None
+    
+    print(f"Loading heartbeats from {file_path}...")
+    try:
+        df = pd.read_csv(file_path, header=None)
+        # Filter for Normal (0) and PVC (2) only
+        # Column 187 is the label
+        df = df[df[187].isin([0.0, 2.0])]
+        data = df.iloc[:, :187].values
+        return data
+    except Exception as e:
+        print(f"Error reading CSV: {e}")
+        return None
+
+def main():
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+        print(f"Connected to Pico at {SERIAL_PORT}")
+    except Exception as e:
+        print(f"Connection Failed: {e}")
+        return
+
+    # 2. Load Data
+    heartbeats = load_data()
+    if heartbeats is None: return
+
+    print("starting simulation: Sending Data + Listening for Diagnosis")
+    print("-" * 50)
+
+    try:
+        for i, beat in enumerate(heartbeats):
+            print(f"\n--- Sending Heartbeat #{i+1} ---")
+            
+            # Send the heartbeat point by point
+            for val in beat:
+                packet = {"val": float(val)}
+                msg = json.dumps(packet) + "\n"
+                ser.write(msg.encode('utf-8'))
+
+                if ser.in_waiting > 0:
+                    try:
+                        raw_data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                        if raw_data.strip():
+                            # Pico sends JSON like {"pico_status": "DANGER", "prob": 0.9}
+                            print(f"PICO DIAGNOSIS: {raw_data.strip()}") 
+                    except:
+                        pass
+
+                time.sleep(0.01) 
+
+            # Small pause between heartbeats
+            time.sleep(0.2)
+
+    except KeyboardInterrupt:
+        print("\nStopping...")
+        ser.close()
 
 if __name__ == "__main__":
-    patient_data = load_and_stitch_data()
-    try:
-        stream_heartbeat(patient_data)
-    except KeyboardInterrupt:
-        pass
+    main()
