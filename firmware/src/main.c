@@ -6,7 +6,6 @@
 #include "pico/multicore.h" // included the multicore library so that we use one core as the safety watch and the other to run the inference of the ML model
 
 // INCLUDE THE GENERATED WEIGHTS FILE
-// This replaces the hardcoded W1, B1, etc.
 #include "model_weights.h"
 
 // config
@@ -122,12 +121,15 @@ int main(){
     int index = 0;
 
     while (1){
-        last_heartbeat_time = to_ms_since_boot(get_absolute_time());
-        core0_active = true;
+        // NOTE: We moved the "Kick the Dog" logic INSIDE the check below.
+        // This ensures the alarm triggers if data stops arriving.
 
         int c = getchar_timeout_us(0); // non-blocking, polling. if empty, return to start of loop immediately to not waste time
 
         if (c != PICO_ERROR_TIMEOUT){
+            last_heartbeat_time = to_ms_since_boot(get_absolute_time());
+            core0_active = true;
+
             if (c == '\n' || c == '}'){
                 buffer[index] = '\0'; // if we've collected the entire data packet, add a null terminator to the string
                 char *val_ptr = strstr(buffer, "\"val\":");

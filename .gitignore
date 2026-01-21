@@ -1,5 +1,4 @@
---- Build Artifacts (Where the SDK lives) ---
-
+# --- Build Artifacts ---
 build/
 *.uf2
 *.elf
@@ -7,27 +6,23 @@ build/
 *.hex
 *.map
 
---- Python ---
-
-pycache/
+# --- Python ---
+__pycache__/
 *.py[cod]
 .venv/
 venv/
 .env
 
---- VS Code & Mac System Files ---
-
+# --- VS Code ---
 .vscode/
 .DS_Store
 
---- CMake ---
-
+# --- CMake ---
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
 
---- Data Files (Cloud Synced) ---
-
+# --- Data Files ---
 *.csv
 *.tflite
