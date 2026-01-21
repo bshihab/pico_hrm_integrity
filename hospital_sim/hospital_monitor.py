@@ -13,7 +13,7 @@ BAUD_RATE = 115200
 CSV_FILE = 'mitbih_test.csv'
 
 # google cloud config
-GCP_API_KEY = "AIzaSyAYfA5H0TMQgfn0xsAamfsjI2qvS5dWwKg"
+GCP_API_KEY = os.getenv("GCP_API_KEY") 
 GCP_BUCKET_NAME = "heart-data-repo-1" 
 GCP_OBJECT_NAME = "mitbih_test.csv"
 
