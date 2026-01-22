@@ -6,6 +6,10 @@ import os
 import requests
 import sys
 import urllib.parse
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # config
 SERIAL_PORT = '/dev/ttyACM0' 
