@@ -1,146 +1,188 @@
 import pandas as pd
-import serial
-import time
-import json
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
 import os
 import requests
-import sys
 import urllib.parse
 from dotenv import load_dotenv
 
+# Load environment variables from .env file
 load_dotenv()
 
-
 # config
-SERIAL_PORT = '/dev/ttyACM0' 
-BAUD_RATE = 115200
-CSV_FILE = 'mitbih_test.csv'
+INPUT_SIZE = 10
+HIDDEN_SIZE = 8
+CLASSES = 3
+CSV_FILENAME = 'mitbih_test.csv'
 
-# google cloud config
+# --- GOOGLE CLOUD CONFIGURATION ---
 GCP_API_KEY = os.getenv("GCP_API_KEY") 
 GCP_BUCKET_NAME = "heart-data-repo-1" 
 GCP_OBJECT_NAME = "mitbih_test.csv"
 
+if not GCP_API_KEY:
+    print("⚠️  WARNING: GCP_API_KEY not found. Ensure you have a .env file.")
+
 def get_google_cloud_url():
-    
+    """Constructs the authenticated Google Cloud Storage API URL."""
     encoded_name = urllib.parse.quote(GCP_OBJECT_NAME, safe='')
     url = f"https://storage.googleapis.com/storage/v1/b/{GCP_BUCKET_NAME}/o/{encoded_name}?alt=media&key={GCP_API_KEY}"
     return url
 
-# Set the source to the Function above
-DATA_SOURCE_NAME = "Google Cloud Storage"
-
-def fetch_data_from_cloud():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(script_dir, CSV_FILE)
-
-    # If file exists and isn't empty, we are good
-    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-        print(f"Data found locally: {file_path}")
-        return file_path
-
-    target_url = get_google_cloud_url()
-
-    print(f"Dataset not found locally.")
-    print(f"Downloading from {DATA_SOURCE_NAME}...")
-    # Don't print the full URL to keep the API Key secret in logs
-    print(f"       Target Bucket: {GCP_BUCKET_NAME}")
-
-    try:
-        response = requests.get(target_url, stream=True)
-        
-        if response.status_code == 200:
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            print(f"Download Complete: Saved to {file_path}")
-            return file_path
-        elif response.status_code == 403:
-            print(f"Access Denied (403). Check your API Key permissions.")
-            return None
-        elif response.status_code == 404:
-            print(f"File Not Found (404). Check Bucket/Object name.")
-            return None
-        else:
-            print(f"Cloud Error: Status Code {response.status_code}")
-            print(f"      Response: {response.text}")
-            return None
-    except Exception as e:
-        print(f"Connection Error: {e}")
-        return None
-
-def load_data():
-    # 1. Ensure we have the data (Download if missing)
-    file_path = fetch_data_from_cloud()
-    
-    if not file_path:
-        return None
-    
-    print(f"Loading heartbeats from {os.path.basename(file_path)}...")
-    try:
-        df = pd.read_csv(file_path, header=None)
-        
-        # Filter for Normal (0), S-Type (1), and V-Type (2)
-        df = df[df[187].isin([0.0, 1.0, 2.0])]
-        
-        # Use data AFTER row 16000 to simulate "New Patients" (Validation Set)
-        data = df.iloc[16000:, :187].values
-        
-        print(f"Loaded {len(data)} 'Unseen' Test Samples.")
-        return data
-    except Exception as e:
-        print(f"CSV Read Error: {e}")
-        return None
-
-def main():
-    # 1. Setup Serial Connection
-    try:
-        if not os.path.exists(SERIAL_PORT):
-            print(f"Warning: Pico not found at {SERIAL_PORT}")
-            print(f"       (Running in simulation mode - Screen only)")
-            ser = None
-        else:
-            ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
-            print(f"Connected to Pico at {SERIAL_PORT}")
-    except Exception as e:
-        print(f"Connection Failed: {e}")
+def force_download_data(): 
+    # to make sure that if the file is not available locally that we can download it on google cloud
+    if os.path.exists(CSV_FILENAME) and os.path.getsize(CSV_FILENAME) > 1000:
+        print(f"✅ Data present: {CSV_FILENAME}")
         return
 
-    # 2. Load Data (Auto-Download included)
-    heartbeats = load_data()
-    if heartbeats is None: return
-
-    print("-" * 50)
-    print("STARTING SIMULATION: Cloud Data -> Pi 5 -> Pico")
-    print("-" * 50)
-
+    target_url = get_google_cloud_url()
+    print(f"⬇️ Downloading data from Google Cloud Storage...")
+    
     try:
-        for i, beat in enumerate(heartbeats):
-            print(f"\n--- Sending Heartbeat #{i+1} ---")
-            
-            for val in beat:
-                packet = {"val": float(val)}
-                msg = json.dumps(packet) + "\n"
-                
-                # Send to Pico if connected
-                if ser:
-                    ser.write(msg.encode('utf-8'))
+        response = requests.get(target_url)
+        if response.status_code == 200:
+            with open(CSV_FILENAME, 'wb') as f:
+                f.write(response.content)
+            print("✅ Download successful!")
+        else:
+            print(f"❌ Download failed (Status: {response.status_code})")
+            print(f"Response: {response.text}")
+    except Exception as e:
+        print(f"❌ Network error: {e}")
 
-                    if ser.in_waiting > 0:
-                        try:
-                            raw_data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
-                            if raw_data.strip():
-                                print(f"PICO DIAGNOSIS: {raw_data.strip()}") 
-                        except:
-                            pass
-                
-                time.sleep(0.01) 
+def load_data():
+    force_download_data()
+    
+    if not os.path.exists(CSV_FILENAME):
+        print("Error, File not found.")
+        return None, None
+        
+    print("Loading dataset...")
+    try:
+        df = pd.read_csv(CSV_FILENAME, header=None)
+        
+        # only keep roles that deal with normal (0), s-type (1), and v-type (2) 
+        df = df[df[187].isin([0.0, 1.0, 2.0])] 
+        
+        # Train on FIRST 16,000 samples
+        X = df.iloc[:16000, 20:20+INPUT_SIZE].values
+        # Slice y to match X length
+        y = df.iloc[:16000, 187].values.astype(int)
+        
+        # one hot encoding, converting column numbers to vectors  
+        y = tf.keras.utils.to_categorical(y, num_classes=CLASSES) 
+        return X, y
+    except Exception as e:
+        print(f"❌ CSV Error: {e}")
+        return None, None
 
-            time.sleep(0.2)
+def quantize_and_export_manual(model):
+    # --- LAYER 1 (Hidden) ---
+    weights1, biases1 = model.layers[0].get_weights()
+    
+    w1_max = np.max(np.abs(weights1))
+    # maps largest weight to maximum 8-bit integer value
+    w1_scale = w1_max / 127.0 
+    
+    # scale up floats to 8 bit integers by dividing by scale and truncating
+    w1_int = (weights1 / w1_scale).astype(np.int8) 
+    
+    # --- LAYER 2 (Output) ---
+    weights2, biases2 = model.layers[1].get_weights() 
+    
+    w2_max = np.max(np.abs(weights2))
+    # different scale than w1 because the max is different
+    w2_scale = w2_max / 127.0 
+    w2_int = (weights2 / w2_scale).astype(np.int8)
+    
+    # --- GENERATE C HEADER CONTENT (Automated) ---
+    c_code = "// Auto-generated by train_tinyml.py\n"
+    c_code += "#ifndef MODEL_WEIGHTS_H\n#define MODEL_WEIGHTS_H\n\n"
+    c_code += "#include <stdint.h>\n\n"
 
-    except KeyboardInterrupt:
-        print("\nStopping...")
-        if ser: ser.close()
+    c_code += f"// Define dimensions here so main.c stays in sync\n"
+    c_code += f"#define INPUT_SIZE {INPUT_SIZE}\n"
+    c_code += f"#define HIDDEN_SIZE {HIDDEN_SIZE}\n"
+    c_code += f"#define CLASSES {CLASSES}\n\n"
+
+    c_code += f"// Layer 1 (Hidden) - Explicit Quantization\n"
+    c_code += f"const float W1_SCALE = {w1_scale:.12f};\n"
+    c_code += f"const int8_t W1[{INPUT_SIZE}][{HIDDEN_SIZE}] = {{\n"
+    for i in range(INPUT_SIZE):
+        row = ", ".join([f"{w:4d}" for w in w1_int[i]])
+        c_code += f"    {{{row}}},\n"
+    c_code += "};\n"
+    c_code += f"const float B1[{HIDDEN_SIZE}] = {{ " + ", ".join([f"{b:.6f}" for b in biases1]) + " };\n\n"
+
+    c_code += f"// Layer 2 (Output) - Explicit Quantization\n"
+    c_code += f"const float W2_SCALE = {w2_scale:.12f};\n"
+    # must print 8-bit int for pico to run more efficiently, but pico will scale it back up before running inference.
+    c_code += f"const int8_t W2[{HIDDEN_SIZE}][{CLASSES}] = {{\n"
+    for i in range(HIDDEN_SIZE):
+        row = ", ".join([f"{w:4d}" for w in w2_int[i]])
+        c_code += f"    {{{row}}},\n"
+    c_code += "};\n"
+    c_code += f"const float B2[{CLASSES}] = {{ " + ", ".join([f"{b:.6f}" for b in biases2]) + " };\n"
+    
+    c_code += "\n#endif // MODEL_WEIGHTS_H\n"
+
+    # --- SAVE TO FILE (ROBUST PATH FINDING) ---
+    # List of possible locations for the firmware src folder
+    possible_paths = [
+        "../firmware/src/model_weights.h",        # If running from training/ folder
+        "firmware/src/model_weights.h",           # If running from root folder
+        "src/model_weights.h",                    # If running from inside firmware/
+    ]
+
+    saved = False
+    for path in possible_paths:
+        dir_name = os.path.dirname(path)
+        # Check if the directory exists
+        if os.path.exists(dir_name):
+            try:
+                with open(path, "w") as f:
+                    f.write(c_code)
+                print(f"✅ SUCCESS: Auto-updated header file at: {os.path.abspath(path)}")
+                print("🚀 You can now Build the firmware immediately!")
+                saved = True
+                break
+            except Exception as e:
+                pass
+
+    if not saved:
+        # Fallback 
+        filename = "model_weights.h"
+        with open(filename, "w") as f:
+            f.write(c_code)
+        print(f"\n⚠️  WARNING: Could not find firmware folder automatically.")
+        print(f"✅  Saved '{filename}' to current directory.")
+        print("👉  ACTION: Please move this file into 'firmware/src/' manually.")
+
+def main():
+    X, y = load_data() 
+    if X is None: return
+
+    print(f"Training on {len(X)} samples...")
+    
+    model = Sequential([
+        Dense(HIDDEN_SIZE, input_dim=INPUT_SIZE, activation='relu'),
+        # converting scores to probabilities
+        Dense(CLASSES, activation='softmax') 
+    ])
+    
+    # we use adam optimizer becayse idk?
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    
+    # Train
+    model.fit(X, y, epochs=20, batch_size=32, validation_split=0.2, verbose=1)
+    
+    loss, acc = model.evaluate(X, y, verbose=1)
+    print(f"Model Accuracy: {acc*100:.2f}%")
+    
+    # Run the automated export
+    quantize_and_export_manual(model)
 
 if __name__ == "__main__":
     main()
