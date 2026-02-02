@@ -2,11 +2,10 @@
 
 A distributed embedded system that simulates a patient monitor and analyzes ECG data in real-time using a custom quantized neural network on a dual-core microcontroller.
 
-**Status:** Complete & Verified (Hardware-in-the-Loop)
 
 ---
 
-## ⚡ Overview
+## Overview
 
 This project demonstrates a safety-critical medical device architecture using the Raspberry Pi Pico (RP2040). It dedicates **Core 0** to real-time AI inference (detecting heart arrhythmias) and **Core 1** to a hard-real-time safety watchdog.
 
