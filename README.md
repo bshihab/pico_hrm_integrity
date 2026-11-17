@@ -1,13 +1,13 @@
-# Dual-Core Safety-Critical Arrhythmia Detector
+# Cloud-to-Edge Heart Rate Monitor
 
-A distributed embedded system that simulates a patient monitor and analyzes ECG data in real-time using a small int8-weight neural network, with its inference code written by hand in C, on a dual-core microcontroller.
+A distributed embedded system that replays ECG data like a patient monitor and classifies each heartbeat in real time on a dual-core microcontroller, using a small int8-weight neural network with inference code written by hand in C.
 
 
 ---
 
 ## Overview
 
-This project demonstrates a safety-critical medical device architecture using the Raspberry Pi Pico (RP2040). It dedicates **Core 0** to real-time AI inference (detecting heart arrhythmias) and **Core 1** to a software watchdog that raises an alarm when the data stream or Core 0 stops.
+This project borrows a pattern from safety-critical medical devices, one core doing the work and the other watching it, on a Raspberry Pi Pico (RP2040). It dedicates **Core 0** to real-time AI inference (detecting heart arrhythmias) and **Core 1** to a software watchdog that raises an alarm when the data stream or Core 0 stops.
 
 The system is validated using a **Hardware-in-the-Loop (HIL)** test bench where a Raspberry Pi 5 acts as a "Patient Simulator," streaming clinical data from Google Cloud Storage over USB Serial.
 
@@ -25,7 +25,7 @@ The system is designed with a **"Doctor and Bodyguard"** dual-core architecture:
 
 ### Key Features
 
-- **Hand-Written Inference, No TensorFlow Lite Micro**: A 32-32-3 MLP in plain C. Weights are stored as int8 with one scale per layer (1,120 bytes); biases and arithmetic stay in float. The quantization saves memory, not compute: each weight is converted back to float before the multiply, and the Cortex-M0+ has no floating-point unit, so the maths runs in software float. The int8 model agrees with the float model on 99.90% of held-out beats (`training/RESULTS.md`).
+- **Hand-Written Inference, No TensorFlow Lite Micro**: A 32-32-3 MLP in plain C. Weights are stored as int8 with one scale per layer (1,120 bytes); biases and arithmetic stay in float. The quantization saves memory, not compute: each weight is converted back to float before the multiply, and the Cortex-M0+ has no floating-point unit, so the math runs in software float. The int8 model agrees with the float model on 99.90% of held-out beats (`training/RESULTS.md`).
 
 - **One Window Definition, Both Sides**: The firmware finds the R-peak with a threshold-and-slope rule and classifies the 32 samples that follow it. The training script cuts its windows from the dataset with the same rule, so the model is trained on exactly what the device feeds it. A dry run in `train_tinyml.py` streams every held-out beat through a copy of the firmware's trigger state machine and checks the windows match.
 
@@ -61,7 +61,7 @@ Wiring, per LED: GPIO to the LED's long leg, short leg through 330 Ω to a Pico 
 - **Hardware**: Raspberry Pi Pico (with headers), Raspberry Pi 5 (or Mac/PC), Micro-USB data cable, breadboard, 4 LEDs, 4 × 330 Ω resistors
 - **Tools**: VS Code, CMake, ARM GCC Toolchain, Python 3.10+
 - **Pico SDK**: cloned locally, with `PICO_SDK_PATH` pointing at it
-- **Data**: `mitbih_test.csv` from the Kaggle [ECG Heartbeat Categorization Dataset](https://www.kaggle.com/datasets/shayanfazeli/heartbeat) (MIT-BIH beats, resampled to 125 Hz). Put it in `training/` and `hospital_sim/`, or host it in your own Cloud Storage bucket and put `GCP_API_KEY=...` in a `.env` file
+- **Data**: `mitbih_test.csv` from the Kaggle [ECG Heartbeat Categorization Dataset](https://www.kaggle.com/datasets/shayanfazeli/heartbeat) (MIT-BIH beats, resampled to 125 Hz). Put it in `training/` and `hospital_sim/`, or host it in your own Cloud Storage bucket and put `GCP_API_KEY=...` in a `.env` file. Only this file is used (re-split here 70/15/15 per class into train / validation / holdout); the larger Kaggle train file is not. Fusion (F) and unclassifiable (Q) beats are dropped, leaving three classes
 
 ### 1. Train the Model (Python)
 
@@ -115,7 +115,7 @@ Each verdict the Pico sends back is printed next to the dataset label, and `--de
 
 ## Safety Demonstration (Watchdog)
 
-To verify the safety-critical watchdog:
+To see the watchdog fire:
 
 1. Run the simulator (`hospital_monitor.py`)
 2. Observe the LED blinking in sync with the data
@@ -146,6 +146,15 @@ To verify the safety-critical watchdog:
 ---
 
 ## Results
+
+Holdout split (15% of beats, never seen in training), int8 model as the Pico computes it:
+
+| | NORMAL | S-TYPE | V-TYPE |
+|---|---|---|---|
+| Recall | 96.9% | 41.7% | 85.8% |
+| Precision | 97.2% | 83.3% | 69.8% |
+
+Overall accuracy 94.6%. The int8 model gives the same answer as the float model on 99.90% of holdout beats. Full confusion matrices are in `training/RESULTS.md`.
 
 `training/RESULTS.md` is regenerated on every training run. It reports per-class recall and precision on the validation and holdout splits for the float model and for the int8 model as the Pico computes it, the agreement between the two, and a dry run of the full stream through a copy of the firmware's trigger. V-type beats are the strong class; S-type beats differ from normal beats mainly in timing rather than shape, so a shape-only window finds fewer than half of them (41.7% on the holdout), and the report says so rather than hiding it behind an overall accuracy figure.
 
