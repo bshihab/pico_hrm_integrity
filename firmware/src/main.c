@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h> 
 #include "pico/stdlib.h"
 #include "pico/multicore.h" 
 
@@ -25,15 +24,10 @@ static const uint ALL_LEDS[] = {LED_NORMAL, LED_STYPE, LED_VTYPE, LED_PANIC, LED
 volatile uint32_t last_heartbeat_time = 0;
 volatile bool core0_active = false;
 
-#ifndef INPUT_SIZE                 // normally defined by the generated header
-#define INPUT_SIZE 10
-#define HIDDEN_SIZE 8
-#define CLASSES 3
-#endif
-#ifndef PEAK_THRESHOLD             // trigger constants, normally from the header too
-#define PEAK_THRESHOLD 0.6f        // a sample above this followed by a lower one is the R-peak
-#define REARM_THRESHOLD 0.3f       // the trigger re-arms once the signal falls below this
-#define REFRACTORY_SAMPLES 40      // ignore triggers this soon after the last (320 ms at 125 Hz)
+// Model size and trigger constants come from the generated header, so the
+// firmware can never disagree with the model it was built against.
+#if !defined(INPUT_SIZE) || !defined(HIDDEN_SIZE) || !defined(CLASSES) || !defined(PEAK_THRESHOLD)
+#error "model_weights.h is missing; run training/train_tinyml.py to generate it"
 #endif
 
 float history_buffer[INPUT_SIZE]; 
@@ -59,17 +53,6 @@ static void blink(uint pin, int count, uint32_t on_ms, uint32_t off_ms) {
 }
 
 float relu(float x) { return x > 0 ? x : 0; }
-
-void softmax(float* input, float* output, int len) {
-    float sum = 0.0;
-    float max_val = input[0];
-    for(int i=1; i<len; i++) if(input[i] > max_val) max_val = input[i];
-    for(int i=0; i<len; i++) {
-        output[i] = expf(input[i] - max_val);
-        sum += output[i];
-    }
-    for(int i=0; i<len; i++) output[i] /= sum;
-}
 
 void safety_cop(){
     // 1. Startup: lamp test (every indicator lights once, so a dead LED or a
@@ -125,16 +108,11 @@ int run_neural_network() {
         }
     }
 
-    float probs[CLASSES];
-    softmax(output_logits, probs, CLASSES);
-
+    // Softmax is monotonic, so the largest logit is the most probable class:
+    // no exp() needed on a chip without a floating-point unit.
     int winner = 0;
-    float max_prob = 0.0;
-    for(int c=0; c<CLASSES; c++) {
-        if(probs[c] > max_prob) {
-            max_prob = probs[c];
-            winner = c;
-        }
+    for (int c = 1; c < CLASSES; c++) {
+        if (output_logits[c] > output_logits[winner]) winner = c;
     }
     return winner;
 }

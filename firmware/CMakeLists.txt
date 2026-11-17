@@ -1,12 +1,9 @@
 cmake_minimum_required(VERSION 3.12)
 
-# --- CONFIGURATION ---
-# 1. Force the compiler location (since VS Code is losing it)
-set(PICO_TOOLCHAIN_PATH "/usr/local/bin") 
-
-# 2. Point to your manual SDK folder
-set(PICO_SDK_PATH "/Users/bilalshihab/dev/pico-sdk")
-set(PICO_SDK_FETCH_FROM_GIT OFF)
+# The Pico SDK location comes from the PICO_SDK_PATH environment variable
+# (export PICO_SDK_PATH=/path/to/pico-sdk), as in the SDK's own examples.
+# The arm-none-eabi toolchain is found on PATH; if it is somewhere else,
+# export PICO_TOOLCHAIN_PATH=/path/to/its/bin.
 
 # --- STANDARD PICO SETUP ---
 include(pico_sdk_import.cmake)
@@ -27,8 +24,8 @@ add_executable(hrm_firmware
 pico_enable_stdio_usb(hrm_firmware 1)
 pico_enable_stdio_uart(hrm_firmware 0)
 
-# Link Libraries (Math, Multicore, Stdlib)
-target_link_libraries(hrm_firmware pico_stdlib pico_multicore m)
+# Link Libraries (Multicore, Stdlib)
+target_link_libraries(hrm_firmware pico_stdlib pico_multicore)
 
 # Generate the .uf2 file
 pico_add_extra_outputs(hrm_firmware)

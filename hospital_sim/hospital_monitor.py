@@ -19,6 +19,7 @@ CSV_FILE = 'mitbih_test.csv'
 # Flat baseline streamed after every beat, so the Pico's trigger always sees a
 # settled baseline before the next R-peak. holdout.json overrides this value.
 INTER_BEAT_GAP = 8
+SAMPLE_RATE_HZ = 125   # the Kaggle MIT-BIH rows are resampled to 125 Hz
 
 # google cloud config
 GCP_API_KEY = os.getenv("GCP_API_KEY") 
@@ -183,15 +184,12 @@ def main():
                     ser.write(msg.encode('utf-8'))
 
                     if ser.in_waiting > 0:
-                        try:
-                            raw_data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
-                            if raw_data.strip():
-                                replies += raw_data
-                                print(f"PICO DIAGNOSIS: {raw_data.strip()}") 
-                        except:
-                            pass
-                
-                time.sleep(0.01) 
+                        raw_data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                        if raw_data.strip():
+                            replies += raw_data
+                            print(f"PICO DIAGNOSIS: {raw_data.strip()}")
+
+                time.sleep(1 / SAMPLE_RATE_HZ)
 
             time.sleep(0.2)
             if ser and expected in replies:
